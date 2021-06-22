@@ -2,18 +2,18 @@
 <doc>
 <assembly>
 <name>
-TcJoy
+TcJoyV2
 </name>
 </assembly>
 <members>
-<member name="M:TcJoy.Form1.TcJoy_GUI_Slow_Update(System.Object,System.EventArgs)">
+<member name="M:TcJoy.Form1.Timer_TcJoyUpdate_Tick(System.Object,System.EventArgs)">
 	<summary>
- TcJoy GUI Slow Update Rate... Updates the GUI with values from PLC Connection, the controller, etc.  
+ TcJoy Update Timer... Updates the GUI with values from PLC Connection, the controller, etc.  
  Runs with Timer_HealthCheck.Interval (could be set slower than default: 100ms to preserve resources)
  </summary>
 	<param name="sender"></param>
 	<param name="e"></param>
-	<remarks>Ticks every 'Timer_HealthCheck.Interval' Milliseconds </remarks>
+	<remarks>Ticks every 'Timer_TcJoyUpdate.Interval' Milliseconds </remarks>
 </member><member name="T:TcJoy.Form1.DataTag">
 	<summary>
  Data Tag Object that we read/write to or from twincat via ADS
