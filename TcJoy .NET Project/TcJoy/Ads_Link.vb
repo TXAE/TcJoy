@@ -19,33 +19,57 @@ Public Class Ads_Link
     Private PendingAttachments As New List(Of AdsLinkVariable)
     Private VarAttachments As New List(Of AdsLinkVariable)
 
-    Public Sub New(ByVal netID As String, ByVal port As Integer)
-        Dim targetState As Ads.StateInfo
+    Public Sub New(ByVal netID As AmsNetId, ByVal port As AmsPort)
+        'Dim targetState As Ads.StateInfo
 
         binReader = New AdsBinaryReader(dataStream)
         binWriter = New AdsBinaryWriter(dataStream)
-        'AdsClient = New TcAdsClient()
-        AddHandler AdsClient.AdsNotification, New AdsNotificationEventHandler(AddressOf AdsNotificationCallback)
-        '   AddHandler AdsClient.isConnected, AddressOf ConnectionChange
-
+        'AddHandler AdsClient.AdsNotification, New AdsNotificationEventHandler(AddressOf AdsNotificationCallback)
         AdsClient.Synchronize = True
         Try
             AdsClient.Connect(netID, port)
-            targetState = AdsClient.ReadState()
-            Console.WriteLine(String.Format("Target device state is {0}", targetState.AdsState))
-        Catch ex As Ads.AdsErrorException
-            Console.WriteLine(String.Format("Connection to PLC failed. {1}, Error code 0x{0:X}", ex.ErrorCode, ex.Message))
+        Catch AdsError As AdsErrorException
+            If AdsError.ErrorCode = AdsErrorCode.TargetMachineNotFound Or AdsError.ErrorCode = AdsErrorCode.ClientSyncTimeOut Then
+                Form1.TextBox_ADSConnectionStatus.Text = AdsError.Message
+                Form1.TextBox_ADSConnectionStatus.BackColor = Color.Orange
+                Form1.TextBox_AdditionalInformation.Text = "Check Net ID"
+                Form1.TextBox_AdditionalInformation.BackColor = Color.Orange
+                Form1.TextBox_ADSNetID.Focus()
+            ElseIf AdsError.ErrorCode = AdsErrorCode.TargetPortNotFound Then
+                For port = 801 To 881 Step 10
+                    Try
+                        AdsClient.Connect(netID, port)
+                        Form1.TextBox_AdditionalInformation.Text = String.Format("I found {0}", port)
+                        If MsgBox(String.Format("I found a PLC with the Net ID you entered, but I could not connect via Port {0}. I tried a few common ports instead and was able to connect to {1}. Do you want to use this Connection?", Form1.TextBox_ADSPort.Text, port), vbQuestion + vbYesNo + vbDefaultButton1, "Automated Port Fix Suggestion") = vbYes Then
+                            Form1.TextBox_ADSPort.Text = port
+                        Else
+                            AdsClient.Dispose()
+                            Form1.TextBox_AdditionalInformation.Text = String.Format("I found port {0}, but I did not connect", port)
+                        End If
+                        Exit Sub
+                    Catch PortFixFailedException As Ads.AdsErrorException
+                        Form1.TextBox_AdditionalInformation.Text = String.Format("Last port I tried was {0}", port)
+                    End Try
+                Next
+                ' The most likely error here is that the target TwinCAT is not in Run mode, but PLC could also be using 
+                ' an unusual port for ADS communication
+                ' Nag user to check if TwinCAT is in run mode
+                ' TargetPortNotFound error will also show when target TwinCAT is in Config Mode!
+                Form1.TextBox_ADSConnectionStatus.BackColor = Color.Orange
+                Form1.TextBox_ADSConnectionStatus.Text = "Target Port Not Found."
+                Form1.TextBox_AdditionalInformation.BackColor = Color.Orange
+                Form1.TextBox_AdditionalInformation.Text = "Check Port & if target TwinCAT is in Run mode!"
+                Form1.TextBox_ADSPort.Focus()
+                MessageBox.Show("Check Port & if target TwinCAT is in Run mode!")
+            Else
+                Console.WriteLine(String.Format("Connection to PLC failed. {1}, Error code 0x{0:X}", AdsError.ErrorCode, AdsError.Message))
+                Form1.TextBox_AdditionalInformation.Text = AdsError.Message
+                Form1.TextBox_AdditionalInformation.BackColor = Color.OrangeRed
+            End If
         End Try
-
-        'Dim loader = AdsClient.CreateSymbolLoader(New SymbolLoaderSettings(SymbolsLoadMode.Flat, Ads.ValueAccess.ValueAccessMode.Symbolic, TwinCAT.Ads.ValueAccess.ValueAccessMode.Default))
-        'Symbols = loader.Symbols()
-        'For Each sym In Symbols
-        '    Console.WriteLine(sym.ToString())
-        'Next
-        ' AdsClient.AddDeviceNotification("RAW_IO.hs_HeartbeatEcho", dataStream, 0, 2, AdsTransMode.OnChange, 1, 2, Main.AdsConnectionStatus)
     End Sub
 
-    Private Sub AdsConnectionChangeCallback() Handles AdsClient.ConnectionStateChanged
+    Public Sub AdsConnectionChangeCallback() Handles AdsClient.ConnectionStateChanged
         Console.WriteLine(String.Format("ADS Connection state has changed to {0}", AdsClient.IsConnected))
         Console.WriteLine(String.Format("Router state is: {0}", AdsClient.RouterState))
         Console.WriteLine(String.Format("Target IsLocal? {0}", AdsClient.IsLocal))
@@ -56,17 +80,10 @@ Public Class Ads_Link
                 Attach(var)
             Next
         End If
-        If Not AdsClient.IsConnected Then
-            'MessageBox.Show("Connection with PLC Lost! Restart this HMI when the PLC is back online.")
-            'Application.Exit()
-            'End
-        End If
     End Sub
 
-    Private Sub SysmbolTableChanged() Handles AdsClient.AdsSymbolVersionChanged
-        Exit Sub
+    Private Sub SymbolTableChanged() Handles AdsClient.AdsSymbolVersionChanged
         Dim syminfo As Ads.ITcAdsSymbol
-
         Console.WriteLine("Symbol table has changed. Need to re-connect all variables.")
         For Each var As AdsLinkVariable In VarAttachments
             Console.WriteLine(String.Format("Re-attaching to {0}", var.tagName))
@@ -80,6 +97,7 @@ Public Class Ads_Link
             End Try
             'NOTE: if data size changes (because it's a structure?) we will be in trouble.
             Try
+                MessageBox.Show(var.AdsDataSize)
                 syminfo = AdsClient.ReadSymbolInfo(var.tagName)
                 var.handle = AdsClient.AddDeviceNotification(var.tagName, dataStream, 0, var.AdsDataSize, AdsTransMode.OnChange, 10, 0, var)
             Catch ex As TwinCAT.Ads.AdsErrorException
@@ -88,63 +106,63 @@ Public Class Ads_Link
         Next
     End Sub
 
-    Private Sub AdsNotificationCallback(sender As Object, e As TwinCAT.Ads.AdsNotificationEventArgs)
-        Dim var As AdsLinkVariable = e.UserData
-        e.DataStream.Position = e.Offset
-        If var.UI_Element.GetType().BaseType() = GetType(MulticastDelegate) Then
-            Dim tmp As MulticastDelegate = var.UI_Element
-            Dim params = tmp.Method.GetParameters()
-            If params(0).ParameterType() Is GetType(Boolean) Then
-                tmp.DynamicInvoke(binReader.ReadBoolean())
+    'Private Sub AdsNotificationCallback(sender As Object, e As TwinCAT.Ads.AdsNotificationEventArgs)
+    '    Dim var As AdsLinkVariable = e.UserData
+    '    e.DataStream.Position = e.Offset
+    '    If var.UI_Element.GetType().BaseType() = GetType(MulticastDelegate) Then
+    '        Dim tmp As MulticastDelegate = var.UI_Element
+    '        Dim params = tmp.Method.GetParameters()
+    '        If params(0).ParameterType() Is GetType(Boolean) Then
+    '            tmp.DynamicInvoke(binReader.ReadBoolean())
 
-            ElseIf params(0).ParameterType() Is GetType(Double) Then
-                tmp.DynamicInvoke(binReader.ReadDouble())
-            ElseIf params(0).ParameterType() Is GetType(Integer) Then
-                If var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_INT32 Then
-                    tmp.DynamicInvoke(binReader.ReadInt32())
-                ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_INT16 Then
-                    tmp.DynamicInvoke(binReader.ReadInt16())
-                ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_UINT16 Then
-                    tmp.DynamicInvoke(binReader.ReadUInt16())
-                End If
-            Else
-                tmp.DynamicInvoke(binReader.ReadInt16().ToString())
-            End If
+    '        ElseIf params(0).ParameterType() Is GetType(Double) Then
+    '            tmp.DynamicInvoke(binReader.ReadDouble())
+    '        ElseIf params(0).ParameterType() Is GetType(Integer) Then
+    '            If var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_INT32 Then
+    '                tmp.DynamicInvoke(binReader.ReadInt32())
+    '            ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_INT16 Then
+    '                tmp.DynamicInvoke(binReader.ReadInt16())
+    '            ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_UINT16 Then
+    '                tmp.DynamicInvoke(binReader.ReadUInt16())
+    '            End If
+    '        Else
+    '            tmp.DynamicInvoke(binReader.ReadInt16().ToString())
+    '        End If
 
-            'Main.Invoke(tmp, binReader.ReadInt16().ToString())
-        ElseIf var.UI_Element.GetType() = GetType(CheckBox) Then
-            Dim chkbox As CheckBox = e.UserData
-            ''Console.WriteLine("CheckBox Changed FROM plc: " + e.UserData.Text + " = " + binReader.ReadBoolean().ToString())
-            'Dim CurrentHandler = chkbox.get
-            var.UI_Element.Checked = binReader.ReadBoolean()
-        ElseIf var.UI_Element.GetType() = GetType(RadioButton) Then
-            'Do nothing for the button click, checked handler will be a MulticastDelegate
-        ElseIf var.UI_Element.GetType().GetProperty("Text") IsNot Nothing Then
+    '        'Main.Invoke(tmp, binReader.ReadInt16().ToString())
+    '    ElseIf var.UI_Element.GetType() = GetType(CheckBox) Then
+    '        Dim chkbox As CheckBox = e.UserData
+    '        ''Console.WriteLine("CheckBox Changed FROM plc: " + e.UserData.Text + " = " + binReader.ReadBoolean().ToString())
+    '        'Dim CurrentHandler = chkbox.get
+    '        var.UI_Element.Checked = binReader.ReadBoolean()
+    '    ElseIf var.UI_Element.GetType() = GetType(RadioButton) Then
+    '        'Do nothing for the button click, checked handler will be a MulticastDelegate
+    '    ElseIf var.UI_Element.GetType().GetProperty("Text") IsNot Nothing Then
 
-            ' Only read if we are not focused, or else it will conflict with the user typing in data.
-            If Not var.UI_Element.Focused Then
+    '        ' Only read if we are not focused, or else it will conflict with the user typing in data.
+    '        If Not var.UI_Element.Focused Then
 
-                If var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_INT32 Then
-                    var.UI_Element.Text = binReader.ReadInt32().ToString()
-                ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_INT16 Then
-                    var.UI_Element.Text = binReader.ReadInt16().ToString()
-                ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_REAL32 Then
-                    'var.UI_Element.Text = binReader.ReadSingle().ToString("#0.0000")
-                ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_REAL64 Then
-                    'var.UI_Element.Text = binReader.ReadDouble().ToString("#0.0000")
-                ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_STRING Then
-                    var.UI_Element.Text = binReader.ReadPlcAnsiString(var.SymbolInfo.BitSize)
-                Else
-                    var.UI_Element.Text = binReader.ReadInt16().ToString()
-                End If
+    '            If var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_INT32 Then
+    '                var.UI_Element.Text = binReader.ReadInt32().ToString()
+    '            ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_INT16 Then
+    '                var.UI_Element.Text = binReader.ReadInt16().ToString()
+    '            ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_REAL32 Then
+    '                'var.UI_Element.Text = binReader.ReadSingle().ToString("#0.0000")
+    '            ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_REAL64 Then
+    '                'var.UI_Element.Text = binReader.ReadDouble().ToString("#0.0000")
+    '            ElseIf var.SymbolInfo.DataTypeId() = AdsDatatypeId.ADST_STRING Then
+    '                var.UI_Element.Text = binReader.ReadPlcAnsiString(var.SymbolInfo.BitSize)
+    '            Else
+    '                var.UI_Element.Text = binReader.ReadInt16().ToString()
+    '            End If
 
-            End If
+    '        End If
 
-        ElseIf var.UI_Element.GetType() = GetType(Boolean) Then
-            var.UI_Element = binReader.ReadBoolean()
-        End If
+    '    ElseIf var.UI_Element.GetType() = GetType(Boolean) Then
+    '        var.UI_Element = binReader.ReadBoolean()
+    '    End If
 
-    End Sub
+    'End Sub
 
     Public Sub Attach(variable As AdsLinkVariable)
         Attach(variable.tagName, variable.action, variable.dotNetDataType)
@@ -172,7 +190,6 @@ Public Class Ads_Link
             If syminfo Is Nothing Then
                 Console.WriteLine(String.Format("Unable to get symbol info for {0}. Is name spelled correctly?", Variable))
             Else
-
                 var = New AdsLinkVariable(Variable, Obj, h, dataType)
                 var.AdsDataSize = syminfo.Size
                 var.SymbolInfo = syminfo

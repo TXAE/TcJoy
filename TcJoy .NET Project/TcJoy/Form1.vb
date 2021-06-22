@@ -1,8 +1,6 @@
-﻿Imports TwinCAT
-Imports TwinCAT.Ads
+﻿Imports TwinCAT.Ads
 Imports J2i.Net.XInputWrapper
 Imports System.ComponentModel
-Imports System
 
 '
 ' TcJoy, by Evan Jensen of Jensen Mecharonics, LLC. 2018 
@@ -17,7 +15,7 @@ Imports System
 '
 ' MIT License
 
-' Copyright(c) 2018 Evan Jensen of Jensen Mecharonics, LLC.
+' Copyright(c) 2018 Evan Jensen of Jensen Mecharonics, LLC.connection with the
 
 ' Permission Is hereby granted, free Of charge, to any person obtaining a copy
 ' of this software And associated documentation files (the "Software"), to deal
@@ -40,12 +38,12 @@ Imports System
 
 Public Class Form1
 
-    Public BgTaskData As TaskData ' Data for background task that runs actual ADS comms.
+    Public BgTaskData As TaskData                       ' Data for background task that runs actual ADS comms.
 
-    Public WithEvents Timer_HealthCheck As New Timer ' Timer that updates the screen variables
+    Public WithEvents Timer_TcJoyUpdate As New Timer    ' Timer that updates the TcJoy GUI (default: 100ms)
+    Public WithEvents Timer_SendDataToPLC As New Timer  ' Timer that sends ADS data to the PLC.
 
-    Public WithEvents Timer_SendDataToPLC As New Timer ' Timer that sends ADS data to the PLC.
-    Public HeartBeatState As Boolean  ' Toggle helper for heartbeat.
+    Public HeartBeatState As Boolean                    ' Toggle helper for heartbeat.
 
     Public MyController As XboxController
 
@@ -53,21 +51,16 @@ Public Class Form1
 
     Private Sub Form1_Load(sender As Object, e As EventArgs) Handles MyBase.Load
 
-        TabControl.SelectedTab = TabPage_Connection
-
         LoadSettings()
 
-        Timer_HealthCheck.Interval = 250  ' 250ms update rate to screen.
-        Timer_HealthCheck.Start()
-
         MyController = XboxController.RetrieveController(0)
-        XboxController.StartPolling()
-
-        BgTaskData = New TaskData(0, 0, 0, "", 851)
 
         If My.Settings.bAutoConnectADS Then
-            ConnectToPLC()
+            Button_ADSConnect_Click(Me, e)
         End If
+
+        'Start Health Check (GUI Update)
+        Timer_TcJoyUpdate.Start()
 
     End Sub
 
@@ -79,13 +72,16 @@ Public Class Form1
             Me.Location = My.Computer.Screen.Bounds.Location  ' Optional factory reset if holding shift on startup
         End If
 
+        TabControl.SelectedTab = TabPage_Connection
+
         Button_ADSDisconnect.Enabled = False
+        TextBox_AdditionalInformation.Enabled = False
+        TextBox_ADSConnectionStatus.Enabled = False
+        TextBox_ADSConnectionStatus2.Enabled = False
 
-        SendMessage(ProgressBar_ADSGood.Handle, 1040, 1, 0)
-        SendMessage(ProgressBar_ADSBad.Handle, 1040, 2, 0)
-
-        TextBox_ADSConnectionStatus.Text = "Not Conntected to PLC"
-        TextBox_ADSConnectionStatus2.Text = "Not Conntected to PLC"
+        If TextBox_ADSNetID.Text = "" Then
+            Button_ResetSettings_Click(Me, System.EventArgs.Empty)
+        End If
 
         CheckBox_AutoConnectOnOpen.Checked = My.Settings.bAutoConnectADS
         TextBox_ADSNetID.Text = My.Settings.sPLC_NETID
@@ -94,80 +90,210 @@ Public Class Form1
         TextBox_ADSRate.Text = My.Settings.sADSRate
         TextBox_ADSWatchdog.Text = My.Settings.sADSWatchdog
         TextBox_ADSWatchdogDeadDuration.Text = My.Settings.sADSWatchdogDeadDuration
+        Textbox_TcJoyUpdateRate.Text = My.Settings.sTcJoyUpdateRate
         TextBox_AnalogDeadzone.Text = My.Settings.sAnalogDeadZone
         TextBox_ShoulderDeadzone.Text = My.Settings.sShoulderDeadZone
 
-        If TextBox_ADSNetID.Text = "" Then
-            TextBox_ADSNetID.Text = "0.0.0.0.0.0"
-        End If
-        If TextBox_ADSPort.Text = "" Then
-            TextBox_ADSPort.Text = "851"
-        End If
+        ' Create dummy TaskData instance so we don't get NullException when we're not connected yet
+        BgTaskData = New TaskData(My.Settings.sADSRate,
+                                  My.Settings.sADSWatchdog,
+                                  My.Settings.sADSWatchdogDeadDuration,
+                                  AmsNetId.Parse("192.168.1.10.1.1"),
+                                  My.Settings.sPLC_PORT)
+    End Sub
 
-        If TextBox_TcJoyPath.Text = "" Then
-            TextBox_TcJoyPath.Text = "Global_Variables.TcJoy"
-        End If
+    Private Sub Timer_SendDataToPLC_Tick(sender As Object, e As EventArgs) Handles Timer_SendDataToPLC.Tick
+        MyController.UpdateState()
+        'If MyController.IsConnected Then
+        HeartBeatState = Not HeartBeatState ' Invert heartbeat before send.
+        Try
+            ' Controller Data to the PLC. (From the PLC happens in the PLC_Polling.vb File)
+            For Each Tag As DataTag In BgTaskData.TagList
+                Select Case Tag.TagName
+                    ' Buttons/Bools
+                    Case TextBox_TcJoyPath.Text + ".in_boControllerConnected"
+                        Tag.Value = MyController.IsConnected
+                    Case TextBox_TcJoyPath.Text + ".out_boStart_Button"
+                        Tag.Value = MyController.IsStartPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boBack_Button"
+                        Tag.Value = MyController.IsBackPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boA_Button"
+                        Tag.Value = MyController.IsAPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boB_Button"
+                        Tag.Value = MyController.IsBPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boX_Button"
+                        Tag.Value = MyController.IsXPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boY_Button"
+                        Tag.Value = MyController.IsYPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boLeftShoulder_Button"
+                        Tag.Value = MyController.IsLeftShoulderPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boRightShoulder_Button"
+                        Tag.Value = MyController.IsRightShoulderPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boLeftStick_Button"
+                        Tag.Value = MyController.IsLeftStickPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boRightStick_Button"
+                        Tag.Value = MyController.IsRightStickPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boDPad_Up_Button"
+                        Tag.Value = MyController.IsDPadUpPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boDPad_Left_Button"
+                        Tag.Value = MyController.IsDPadLeftPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boDPad_Right_Button"
+                        Tag.Value = MyController.IsDPadRightPressed
+                    Case TextBox_TcJoyPath.Text + ".out_boDPad_Down_Button"
+                        Tag.Value = MyController.IsDPadDownPressed
 
-        If My.Settings.sADSRate = "" Then
-            TextBox_ADSRate.Text = "50"
-        End If
+                        ' Analog Triggers should be handled as USINTs/Byte as their range from the Xbox Controller is exactly 0 to 255
+                    Case TextBox_TcJoyPath.Text + ".out_usiLeftTrigger_Axis"
+                        Tag.Value = MyController.LeftTrigger.ToString
+                    Case TextBox_TcJoyPath.Text + ".out_usiRightTrigger_Axis"
+                        Tag.Value = MyController.RightTrigger.ToString
 
-        If TextBox_ADSWatchdog.Text = "" Then
-            TextBox_ADSWatchdog.Text = "100"
-        End If
 
-        If TextBox_ADSWatchdogDeadDuration.Text = "" Then
-            TextBox_ADSWatchdogDeadDuration.Text = "2000"
-        End If
+                        ' Sticks. Want to send as Integers, but does not work to a TwinCAT 2 PLC
+                        ' TODO: Beckhoff TwinCAT 2 Problem? No Problems with Integers in TC3
+                    Case TextBox_TcJoyPath.Text + ".out_sLeftStick_X_Axis"
+                        Tag.Value = MyController.LeftThumbStick.X.ToString
+                    Case TextBox_TcJoyPath.Text + ".out_sLeftStick_Y_Axis"
+                        Tag.Value = MyController.LeftThumbStick.Y.ToString
+                    Case TextBox_TcJoyPath.Text + ".out_sRightStick_X_Axis"
+                        Tag.Value = MyController.RightThumbStick.X.ToString
+                    Case TextBox_TcJoyPath.Text + ".out_sRightStick_Y_Axis"
+                        Tag.Value = MyController.RightThumbStick.Y.ToString
 
-        If TextBox_AnalogDeadzone.Text = "" Then
-            TextBox_AnalogDeadzone.Text = "6000" ' counts of 32767
-        End If
+                        'Why? We don't need the battery info to be sent to the PLC?!
+                        'Case TextBox_TcJoyPath.Text + ".sBatteryInfo"
+                        '    MyController.UpdateBatteryState()
+                        '    Select Case MyController.BatteryInformationGamepad.BatteryLevel
+                        '        Case BatteryLevel.BATTERY_LEVEL_EMPTY
+                        '            Tag.Value = "0"
+                        '        Case BatteryLevel.BATTERY_LEVEL_LOW
+                        '            Tag.Value = "25"
+                        '        Case BatteryLevel.BATTERY_LEVEL_MEDIUM
+                        '            Tag.Value = "50"
+                        '        Case BatteryLevel.BATTERY_LEVEL_FULL
+                        '            Tag.Value = "100"
+                        '        Case Else
+                        '            Tag.Value = "unkn"
+                        '    End Select
 
-        If TextBox_ShoulderDeadzone.Text = "" Then
-            TextBox_ShoulderDeadzone.Text = "0"  ' counts of 255
-        End If
+                    Case TextBox_TcJoyPath.Text + ".in_boHeartBeatToggle"
+                        Tag.Value = HeartBeatState
 
+                        ' TODO: Doesn't need to be sent every tick
+                    Case TextBox_TcJoyPath.Text + ".in_sADSWatchdogMS"
+                        Tag.Value = "T#" + TextBox_ADSWatchdog.Text + "ms"
+                    Case TextBox_TcJoyPath.Text + ".in_sADSWatchdogDeadDurationMS"
+                        Tag.Value = "T#" + TextBox_ADSWatchdogDeadDuration.Text + "ms"
+                End Select
+            Next
+
+        Catch ex As Exception
+            MessageBox.Show(ex.Message + " Disconnecting from PLC.")
+            Button_ADSDisconnect_Click(Me, e)
+        End Try
+        ' Fire off dude that goes and applies the changes to the code.
+        PLC_IO_Polling.StartWorker()
+        'End If
     End Sub
 
     ''' <summary>
-    ''' System Health Check Slow Rate... Updates the gui with values from the controller, etc.  Runs slower than ADS cycle to preserve resources.
+    ''' TcJoy Update Timer... Updates the GUI with values from PLC Connection, the controller, etc.  
+    ''' Runs with Timer_HealthCheck.Interval (could be set slower than default: 100ms to preserve resources)
     ''' </summary>
     ''' <param name="sender"></param>
     ''' <param name="e"></param>
-    ''' <remarks>Ticks every 'My.Settings.iHeathCheckPulseMS_Slow' Milliseconds </remarks>
-    Private Sub Timer_HealthCheck_Tick_Slow(sender As Object, e As EventArgs) Handles Timer_HealthCheck.Tick
-        Try
-            If Not BgTaskData Is Nothing Then
-                If BgTaskData.ADS_Connection Is Nothing Then
-                    TextBox_ADSConnectionStatus.Text = "Not Connected Yet."
-                    TextBox_ADSConnectionStatus2.Text = TextBox_ADSConnectionStatus.Text
-                ElseIf BgTaskData.ADS_Connection.AdsClient.IsConnected Then
-                    TextBox_ADSConnectionStatus.Text = "Connected."
-                    TextBox_ADSConnectionStatus2.Text = TextBox_ADSConnectionStatus.Text
-                Else
-                    TextBox_ADSConnectionStatus.Text = "Not Connected."
-                    TextBox_ADSConnectionStatus2.Text = TextBox_ADSConnectionStatus.Text
+    ''' <remarks>Ticks every 'Timer_TcJoyUpdate.Interval' Milliseconds </remarks>
+    Private Sub Timer_TcJoyUpdate_Tick(sender As Object, e As EventArgs) Handles Timer_TcJoyUpdate.Tick
+        'Update PLC information only when we're communicating with the PLC
+        If Timer_SendDataToPLC.Enabled Then
+            ' Do Reads at slow speed, we don't need really any of this for actual functionality, but it is nice for status.
+            Dim symbol As ITcAdsSymbol
+            Dim debug = False
+            'Dim VibrateLenght As New TimeSpan(0, 0, 0, 0, 0)
+            'Dim VibrateIntensity As Integer
+            For Each tag As DataTag In BgTaskData.TagList
+                If tag.IsRead Then
+                    Try
+                        ' Get data type and other information from PLC variable
+                        symbol = BgTaskData.ADS_Connection.AdsClient.ReadSymbolInfo(tag.TagName)
+
+                        ' Read Value of isRead PLC variable in tag.Value of our BgTaskData.Taglist
+                        tag.Value = BgTaskData.ADS_Connection.AdsClient.ReadSymbol(symbol)
+
+                        If debug Then Console.WriteLine(tag.TagName + " value = " + tag.Value.ToString)
+                        BgTaskData.IsConnected = BgTaskData.ADS_Connection.AdsClient.IsConnected
+                    Catch ex As Exception
+                        Button_ADSDisconnect_Click(Me, e)
+                        If ex.Message = "Ads-Error 0x745 : Timeout has elapsed. (Ads-Error 0x745 : Timeout has elapsed.)" Then
+                            TextBox_AdditionalInformation.Text = "TcJoy lost connection to the PLC!"
+                            TextBox_AdditionalInformation.BackColor = Color.OrangeRed
+                            MessageBox.Show("TcJoy lost connection to the PLC! Exception Message: " + ex.Message)
+                            Exit Sub
+                        Else
+                            TextBox_AdditionalInformation.BackColor = Color.Orange
+                            TextBox_AdditionalInformation.Text = ex.Message
+                            TextBox_PLCVariables.BackColor = Color.Orange
+                            TextBox_PLCVariables.Text = "Could not read from: " + tag.TagName
+                            MessageBox.Show("Could not read from: " + tag.TagName + vbNewLine +
+                                            "Most likely cause: A Variable from the TcJoy TagList (see PLC_Polling.vb file) " +
+                                            "does not exist on the PLC TcJoy Function Block." + vbNewLine + "Exception Message: " + ex.Message)
+                            Exit Sub
+                        End If
+                    End Try
+
+                    ' Do stuff with our new found tag reads... 
+                    Select Case tag.TagName
+
+                        Case TextBox_TcJoyPath.Text + ".boIsActive"
+                            If tag.Value Then
+                                TextBox_PLCVariables.BackColor = Color.LawnGreen
+                                TextBox_PLCVariables.Text = "boIsActive = true"
+                            Else
+                                TextBox_PLCVariables.BackColor = Color.Orange
+                                TextBox_PLCVariables.Text = "boIsActive = false"
+                                TextBox_ADSDataRateAchieved.Text = "boIsActive = false"
+                                Exit Sub
+                            End If
+
+                        Case TextBox_TcJoyPath.Text + ".boWatchdogFailureActive"
+                            If tag.Value Then
+                                TextBox_PLCVariables.BackColor = Color.OrangeRed
+                                TextBox_PLCVariables.Text = "Watchdog Failure"
+                            End If
+
+                        Case TextBox_TcJoyPath.Text + ".boControlerInputsMustBeReleased"
+                            If tag.Value Then
+                                TextBox_PLCVariables.BackColor = Color.Orange
+                                TextBox_PLCVariables.Text = "Release Controller Inputs"
+                            End If
+
+                        Case TextBox_TcJoyPath.Text + ".tonUpdateRate.ET"
+                            ' Fill out latency status bar graphs with achieved rate.
+                            TextBox_ADSDataRateAchieved.Text = "Latency: " + tag.Value.ToString
+
+                            'Case TextBox_TcJoyPath.Text + ".sVibrateLength"
+                            '    If tag.Value > 0 Then
+                            '        VibrateLenght = New TimeSpan(0, 0, 0, 0, tag.Value)
+                            '    End If
+
+                            'Case TextBox_TcJoyPath.Text + ".sVibrateIntensity"
+                            '    If Not tag.Value Is Nothing Then
+                            '        VibrateIntensity = tag.Value
+                            '    End If
+                    End Select
+                    'MyController.Vibrate(0, VibrateIntensity, VibrateLenght)
                 End If
-            End If
+            Next
+            ' Update Controller State with this Timer when we're not connected to PLC so User can see Controller Inputs when looking at Live Status Tab
+        ElseIf TabControl.SelectedTab Is TabPage_LiveStatus Then
+            MyController.UpdateState()
+        End If
 
-
-        Catch ex As Exception
-            ' Do nothing on null ref.
-        End Try
-
-        If Not MyController Is Nothing Then
-
-            If MyController.IsConnected Then
-                Label_Controller0_Connection.Text = "      Controller 0 Connected     "
-                Label_Controller0_Connection.BackColor = Color.LawnGreen
-            Else
-                Label_Controller0_Connection.Text = "  Controller 0 NOT CONNECTED!    "
-                Label_Controller0_Connection.BackColor = Color.OrangeRed
-            End If
-
+        If TabControl.SelectedTab Is TabPage_LiveStatus Then
             ' Update controller readout display
             If MyController.IsConnected Then
+                Label_Controller_Connection.Text = "      Controller 0 Connected     "
+                Label_Controller_Connection.BackColor = Color.LawnGreen
 
                 If MyController.LeftThumbStick.X >= 0 Then
                     UpdateProgressBar(ProgressBar_LeftStickXPlus, Math.Abs(MyController.LeftThumbStick.X))
@@ -193,19 +319,27 @@ Public Class Form1
                 End If
 
                 ' Color thumbstick sliders
-                If Math.Abs(MyController.LeftThumbStick.X) < CInt(TextBox_AnalogDeadzone.Text) Then
-                    SendMessage(ProgressBar_LeftStickXPlus.Handle, 1040, 2, 0) ' Turn Red
-                    SendMessage(ProgressBar_LeftStickXMinus.Handle, 1040, 2, 0) ' Turn Red
-                Else
-                    SendMessage(ProgressBar_LeftStickXPlus.Handle, 1040, 1, 0) ' Turn Green
-                    SendMessage(ProgressBar_LeftStickXMinus.Handle, 1040, 1, 0) ' Turn Green
+                If Math.Abs(MyController.LeftThumbStick.X) < CInt(TextBox_AnalogDeadzone.Text) Then ' Turn Red
+                    SendMessage(ProgressBar_LeftStickXPlus.Handle, 1040, 2, 0)
+                    SendMessage(ProgressBar_LeftStickXMinus.Handle, 1040, 2, 0)
+                    Label_LeftStickXPos.ForeColor = Color.DarkRed
+                    Label_LeftStickXNeg.ForeColor = Color.DarkRed
+                Else ' Turn Green
+                    SendMessage(ProgressBar_LeftStickXPlus.Handle, 1040, 1, 0)
+                    SendMessage(ProgressBar_LeftStickXMinus.Handle, 1040, 1, 0)
+                    Label_LeftStickXPos.ForeColor = Color.DarkGreen
+                    Label_LeftStickXNeg.ForeColor = Color.DarkGreen
                 End If
-                If Math.Abs(MyController.LeftThumbStick.Y) < CInt(TextBox_AnalogDeadzone.Text) Then
-                    SendMessage(ProgressBar_LeftStickYPlus.Handle, 1040, 2, 0) ' Turn Red
-                    SendMessage(ProgressBar_LeftStickYMinus.Handle, 1040, 2, 0) ' Turn Red
-                Else
-                    SendMessage(ProgressBar_LeftStickYPlus.Handle, 1040, 1, 0) ' Turn Green
-                    SendMessage(ProgressBar_LeftStickYMinus.Handle, 1040, 1, 0) ' Turn Green
+                If Math.Abs(MyController.LeftThumbStick.Y) < CInt(TextBox_AnalogDeadzone.Text) Then ' Turn Red
+                    SendMessage(ProgressBar_LeftStickYPlus.Handle, 1040, 2, 0)
+                    SendMessage(ProgressBar_LeftStickYMinus.Handle, 1040, 2, 0)
+                    Label_LeftStickYPos.ForeColor = Color.DarkRed
+                    Label_LeftStickYNeg.ForeColor = Color.DarkRed
+                Else ' Turn Green
+                    SendMessage(ProgressBar_LeftStickYPlus.Handle, 1040, 1, 0)
+                    SendMessage(ProgressBar_LeftStickYMinus.Handle, 1040, 1, 0)
+                    Label_LeftStickYPos.ForeColor = Color.DarkGreen
+                    Label_LeftStickYNeg.ForeColor = Color.DarkGreen
                 End If
 
                 If MyController.RightThumbStick.X >= 0 Then
@@ -233,43 +367,61 @@ Public Class Form1
                 End If
 
                 ' Color thumbstick sliders
-                If Math.Abs(MyController.RightThumbStick.X) < CInt(TextBox_AnalogDeadzone.Text) Then
-                    SendMessage(ProgressBar_RightStickXPlus.Handle, 1040, 2, 0) ' Turn Red
-                    SendMessage(ProgressBar_RightStickXMinus.Handle, 1040, 2, 0) ' Turn Red
-                Else
-                    SendMessage(ProgressBar_RightStickXPlus.Handle, 1040, 1, 0) ' Turn Green
-                    SendMessage(ProgressBar_RightStickXMinus.Handle, 1040, 1, 0) ' Turn Green
+                If Math.Abs(MyController.RightThumbStick.X) < CInt(TextBox_AnalogDeadzone.Text) Then ' Turn Red
+                    SendMessage(ProgressBar_RightStickXPlus.Handle, 1040, 2, 0)
+                    SendMessage(ProgressBar_RightStickXMinus.Handle, 1040, 2, 0)
+                    Label_RightStickXPos.ForeColor = Color.DarkRed
+                    Label_RightStickXNeg.ForeColor = Color.DarkRed
+                Else ' Turn Green
+                    SendMessage(ProgressBar_RightStickXPlus.Handle, 1040, 1, 0)
+                    SendMessage(ProgressBar_RightStickXMinus.Handle, 1040, 1, 0)
+                    Label_RightStickXPos.ForeColor = Color.DarkGreen
+                    Label_RightStickXNeg.ForeColor = Color.DarkGreen
                 End If
-                If Math.Abs(MyController.RightThumbStick.Y) < CInt(TextBox_AnalogDeadzone.Text) Then
-                    SendMessage(ProgressBar_RightStickYPlus.Handle, 1040, 2, 0) ' Turn Red
-                    SendMessage(ProgressBar_RightStickYMinus.Handle, 1040, 2, 0) ' Turn Red
-                Else
-                    SendMessage(ProgressBar_RightStickYPlus.Handle, 1040, 1, 0) ' Turn Green
-                    SendMessage(ProgressBar_RightStickYMinus.Handle, 1040, 1, 0) ' Turn Green
+                If Math.Abs(MyController.RightThumbStick.Y) < CInt(TextBox_AnalogDeadzone.Text) Then ' Turn Red
+                    SendMessage(ProgressBar_RightStickYPlus.Handle, 1040, 2, 0)
+                    SendMessage(ProgressBar_RightStickYMinus.Handle, 1040, 2, 0)
+                    Label_RightStickYPos.ForeColor = Color.DarkRed
+                    Label_RightStickYNeg.ForeColor = Color.DarkRed
+                Else ' Turn Green
+                    SendMessage(ProgressBar_RightStickYPlus.Handle, 1040, 1, 0)
+                    SendMessage(ProgressBar_RightStickYMinus.Handle, 1040, 1, 0)
+                    Label_RightStickYPos.ForeColor = Color.DarkGreen
+                    Label_RightStickYNeg.ForeColor = Color.DarkGreen
                 End If
 
-                CheckBox_AButton.Checked = MyController.IsAPressed
-                CheckBox_BButton.Checked = MyController.IsBPressed
-                CheckBox_XButton.Checked = MyController.IsXPressed
-                CheckBox_YButton.Checked = MyController.IsYPressed
+                ' Motor vibrations/rumble test
+                If MyController.IsAPressed Then
+                    Dim VibrateSpan As New TimeSpan(0, 0, 0, 0, 100)
+                    MyController.Vibrate(0, 0.1, VibrateSpan)
+                End If
 
-                CheckBox_DPadDown.Checked = MyController.IsDPadDownPressed
-                CheckBox_DPadUp.Checked = MyController.IsDPadUpPressed
-                CheckBox_DPadLeft.Checked = MyController.IsDPadLeftPressed
-                CheckBox_DPadRight.Checked = MyController.IsDPadRightPressed
+                ' Show Button presses
+                CheckBox_AButton.Visible = MyController.IsAPressed
+                CheckBox_BButton.Visible = MyController.IsBPressed
+                CheckBox_XButton.Visible = MyController.IsXPressed
+                CheckBox_YButton.Visible = MyController.IsYPressed
 
-                CheckBox_LeftShoulderBtn.Checked = MyController.IsLeftShoulderPressed
-                CheckBox_RightShoulderBtn.Checked = MyController.IsRightShoulderPressed
+                Button_LeftJoystick.Visible = MyController.IsLeftStickPressed
+                Button_RightJoystick.Visible = MyController.IsRightStickPressed
 
-                CheckBox_BackBtn.Checked = MyController.IsBackPressed
-                CheckBox_StartBtn.Checked = MyController.IsStartPressed
+                Button_DPadDown.Visible = MyController.IsDPadDownPressed
+                Button_DPadUp.Visible = MyController.IsDPadUpPressed
+                Button_DPadLeft.Visible = MyController.IsDPadLeftPressed
+                Button_DPadRight.Visible = MyController.IsDPadRightPressed
+
+                Button_LeftShoulder.Visible = MyController.IsLeftShoulderPressed
+                Button_RightShoulder.Visible = MyController.IsRightShoulderPressed
+
+                Button_Back.Visible = MyController.IsBackPressed
+                Button_Start.Visible = MyController.IsStartPressed
 
                 UpdateProgressBar(ProgressBar_LeftShoulderAnalog, MyController.LeftTrigger)
                 Label_LeftShoulderVal.Text = MyController.LeftTrigger.ToString
                 UpdateProgressBar(ProgressBar_RightShoulderAnalog, MyController.RightTrigger)
                 Label_RightShoulderVal.Text = MyController.RightTrigger.ToString
 
-                ' Color shoulder sliders
+                ' Color shoulder trigger sliders
                 If MyController.LeftTrigger < CInt(TextBox_ShoulderDeadzone.Text) Then
                     SendMessage(ProgressBar_LeftShoulderAnalog.Handle, 1040, 2, 0) ' Turn Red
                 Else
@@ -284,113 +436,32 @@ Public Class Form1
                 Select Case MyController.BatteryInformationGamepad.BatteryLevel
 
                     Case BatteryLevel.BATTERY_LEVEL_EMPTY
-
                         ProgressBar_Controller0Battery.Value = 0
                         SendMessage(ProgressBar_Controller0Battery.Handle, 1040, 2, 0) ' Turn Red
 
                     Case BatteryLevel.BATTERY_LEVEL_LOW
-
                         ProgressBar_Controller0Battery.Value = 25
                         SendMessage(ProgressBar_Controller0Battery.Handle, 1040, 2, 0) ' Turn Red
 
                     Case BatteryLevel.BATTERY_LEVEL_MEDIUM
-
                         ProgressBar_Controller0Battery.Value = 50
                         SendMessage(ProgressBar_Controller0Battery.Handle, 1040, 1, 0) ' Turn Green
 
                     Case BatteryLevel.BATTERY_LEVEL_FULL
-
                         ProgressBar_Controller0Battery.Value = 100
                         SendMessage(ProgressBar_Controller0Battery.Handle, 1040, 1, 0) ' Turn Green
 
                     Case Else
-
                         Console.WriteLine("Battery: " + "Error: " + MyController.BatteryInformationGamepad.BatteryLevel.ToString)
                         ProgressBar_Controller0Battery.Value = 100
                         SendMessage(ProgressBar_Controller0Battery.Handle, 1040, 2, 0) ' Turn Red
 
                 End Select
-
-            End If
-
-        End If
-
-        ' Do Reads at slow speed, we don't need really any of this for actual functionality, but it is nice for status.
-        If Not BgTaskData Is Nothing Then
-            If Not BgTaskData.ADS_Connection Is Nothing Then
-                If BgTaskData.ADS_Connection.AdsClient.IsConnected Then
-
-                    Dim symbol As ITcAdsSymbol
-                    Dim debug = False
-                    For Each tag As Form1.DataTag In BgTaskData.TagList
-
-                        If tag.IsRead Then
-
-                            Try
-                                ' Get data type and other information from PLC
-                                symbol = BgTaskData.ADS_Connection.AdsClient.ReadSymbolInfo(tag.TagName)
-
-                                tag.Value = BgTaskData.ADS_Connection.AdsClient.ReadSymbol(symbol)
-                                If debug Then Console.WriteLine(tag.TagName + " value = " + tag.Value.ToString)
-                                BgTaskData.IsConnected = BgTaskData.ADS_Connection.AdsClient.IsConnected
-
-                            Catch ex As Exception
-                                Console.WriteLine("Could not get symbol or write tag: " + tag.TagName + " ex: " + ex.Message)
-                                BgTaskData.IsConnected = False
-                                BackgroundWorker1.CancelAsync()
-                            End Try
-
-                        End If
-
-                        ' Do stuff with our new found tag reads... 
-                        Select Case tag.TagName
-
-                            Case TextBox_TcJoyPath.Text + ".bIsActive"
-                                If tag.Value Then
-                                    Label_JoyActiveFromPLC.BackColor = Color.LawnGreen
-                                    Label_JoyActiveFromPLC.Text = "Latency Status"
-                                Else
-                                    If MyController.IsConnected Then
-                                        Label_JoyActiveFromPLC.BackColor = Color.OrangeRed
-                                        Label_JoyActiveFromPLC.Text = "Latency Status"
-                                    Else
-                                        Label_JoyActiveFromPLC.BackColor = Color.OrangeRed
-                                        Label_JoyActiveFromPLC.Text = "No Controller!"
-                                    End If
-
-                                End If
-
-                            Case TextBox_TcJoyPath.Text + ".iUpdateRateMS"
-
-                                ' Fill out latency status bar graphs with achieved rate.
-                                If tag.Value > 0 Then
-
-                                    TextBox_ADSDataRateAchieved.Text = tag.Value.ToString + " ms"
-
-                                    Dim val = (Math.Abs(tag.Value - BgTaskData.UpdateRateMS) / BgTaskData.ADSWatchdogMs) * 100
-                                    If val < 0 Then val = 0
-                                    If val > 100 Then val = 100
-
-                                    If tag.Value <= BgTaskData.UpdateRateMS Then
-                                        ProgressBar_ADSGood.Value = val
-                                        ProgressBar_ADSBad.Value = 0
-                                    Else
-                                        ProgressBar_ADSGood.Value = 0
-                                        ProgressBar_ADSBad.Value = val
-                                    End If
-                                Else
-                                    ProgressBar_ADSGood.Value = 0
-                                    ProgressBar_ADSBad.Value = 0
-                                    TextBox_ADSDataRateAchieved.Text = ""
-                                End If
-
-                        End Select
-                    Next
-                End If
+            Else
+                Label_Controller_Connection.Text = "  Controller 0 NOT CONNECTED!    "
+                Label_Controller_Connection.BackColor = Color.Orange
             End If
         End If
-
-
     End Sub
 
     ' Hack a faster response from dumb animated progress bars.
@@ -405,155 +476,6 @@ Public Class Form1
         End If
     End Sub
 
-    Private Sub Timer_SendDataToPLC_Tick(sender As Object, e As EventArgs) Handles Timer_SendDataToPLC.Tick
-
-        HeartBeatState = Not HeartBeatState ' Invert heartbeat before send.
-
-        Try
-            ' Controller Data to the PLC. (From the PLC happens in the PLC_Polling.vb File)
-            For Each Tag As DataTag In BgTaskData.TagList
-
-                Select Case Tag.TagName
-
-                    Case TextBox_TcJoyPath.Text + ".bControllerConnected"
-                        Tag.Value = MyController.IsConnected
-
-                    Case TextBox_TcJoyPath.Text + ".Start_Button"
-                        Tag.Value = MyController.IsStartPressed
-
-                    Case TextBox_TcJoyPath.Text + ".Back_Button"
-                        Tag.Value = MyController.IsBackPressed
-
-                    Case TextBox_TcJoyPath.Text + ".A_Button"
-                        Tag.Value = MyController.IsAPressed
-
-                    Case TextBox_TcJoyPath.Text + ".B_Button"
-                        Tag.Value = MyController.IsBPressed
-
-                    Case TextBox_TcJoyPath.Text + ".X_Button"
-                        Tag.Value = MyController.IsXPressed
-
-                    Case TextBox_TcJoyPath.Text + ".Y_Button"
-                        Tag.Value = MyController.IsYPressed
-
-                    Case TextBox_TcJoyPath.Text + ".LeftShoulder_Button"
-                        Tag.Value = MyController.IsLeftShoulderPressed
-
-                    Case TextBox_TcJoyPath.Text + ".RightShoulder_Button"
-                        Tag.Value = MyController.IsRightShoulderPressed
-
-                    Case TextBox_TcJoyPath.Text + ".LeftStick_Button"
-                        Tag.Value = MyController.IsLeftStickPressed
-
-                    Case TextBox_TcJoyPath.Text + ".RightStick_Button"
-                        Tag.Value = MyController.IsRightStickPressed
-
-                    Case TextBox_TcJoyPath.Text + ".DPad_Up_Button"
-                        Tag.Value = MyController.IsDPadUpPressed
-
-                    Case TextBox_TcJoyPath.Text + ".DPad_Left_Button"
-                        Tag.Value = MyController.IsDPadLeftPressed
-
-                    Case TextBox_TcJoyPath.Text + ".DPad_Right_Button"
-                        Tag.Value = MyController.IsDPadRightPressed
-
-                    Case TextBox_TcJoyPath.Text + ".DPad_Down_Button"
-                        Tag.Value = MyController.IsDPadDownPressed
-
-                    Case TextBox_TcJoyPath.Text + ".iLeftTrigger_Axis"
-                        If Math.Abs(MyController.LeftTrigger) > CInt(TextBox_ShoulderDeadzone.Text) Then
-                            Tag.Value = MyController.LeftTrigger
-                        Else
-                            Tag.Value = 0
-                        End If
-
-                    Case TextBox_TcJoyPath.Text + ".iRightTrigger_Axis"
-                        If Math.Abs(MyController.RightTrigger) > CInt(TextBox_ShoulderDeadzone.Text) Then
-                            Tag.Value = MyController.RightTrigger
-                        Else
-                            Tag.Value = 0
-                        End If
-
-                    Case TextBox_TcJoyPath.Text + ".iLeftStick_X_Axis"
-                        If Math.Abs(MyController.LeftThumbStick.X) > CInt(TextBox_AnalogDeadzone.Text) Then
-                            Tag.Value = MyController.LeftThumbStick.X
-                        Else
-                            Tag.Value = 0
-                        End If
-
-                    Case TextBox_TcJoyPath.Text + ".iLeftStick_Y_Axis"
-                        If Math.Abs(MyController.LeftThumbStick.Y) > CInt(TextBox_AnalogDeadzone.Text) Then
-                            Tag.Value = MyController.LeftThumbStick.Y
-                        Else
-                            Tag.Value = 0
-                        End If
-
-                    Case TextBox_TcJoyPath.Text + ".iRightStick_X_Axis"
-                        If Math.Abs(MyController.LeftThumbStick.X) > CInt(TextBox_AnalogDeadzone.Text) Then
-                            Tag.Value = MyController.LeftThumbStick.X
-                        Else
-                            Tag.Value = 0
-                        End If
-
-                    Case TextBox_TcJoyPath.Text + ".iRightStick_Y_Axis"
-                        If Math.Abs(MyController.RightThumbStick.Y) > CInt(TextBox_AnalogDeadzone.Text) Then
-                            Tag.Value = MyController.RightThumbStick.Y
-                        Else
-                            Tag.Value = 0
-                        End If
-
-                    Case TextBox_TcJoyPath.Text + ".sBatteryInfo"
-
-                        MyController.UpdateBatteryState()
-
-                        Select Case MyController.BatteryInformationGamepad.BatteryLevel
-
-                            Case BatteryLevel.BATTERY_LEVEL_EMPTY
-
-                                Tag.Value = "0"
-
-                            Case BatteryLevel.BATTERY_LEVEL_LOW
-
-                                Tag.Value = "25"
-
-                            Case BatteryLevel.BATTERY_LEVEL_MEDIUM
-
-                                Tag.Value = "50"
-
-                            Case BatteryLevel.BATTERY_LEVEL_FULL
-
-                                Tag.Value = "100"
-
-                            Case Else
-
-                                Tag.Value = "unkn"
-
-                        End Select
-
-                    Case TextBox_TcJoyPath.Text + ".bHeartBeatToggle"
-                        Tag.Value = HeartBeatState
-
-                    Case TextBox_TcJoyPath.Text + ".iADSWatchdogMS"
-                        Tag.Value = BgTaskData.ADSWatchdogMs
-
-                    Case TextBox_TcJoyPath.Text + ".iADSWatchdogDeadDurationMS"
-                        Tag.Value = BgTaskData.ADSWatchdogDeadDurationMS
-
-                End Select
-
-            Next
-
-        Catch ex As Exception
-            MessageBox.Show(ex.Message + " Disconnecting from PLC.")
-            DisconnectFromPLC()
-        End Try
-
-        ' Fire off dude that goes and applies the changes to the code.
-        PLC_IO_Polling.StartWorker()
-
-    End Sub
-
-
 #Region "Connection Tab"
 
     Private Sub CheckBox_AutoConnectOnOpen_CheckedChanged(sender As Object, e As EventArgs) Handles CheckBox_AutoConnectOnOpen.CheckedChanged
@@ -567,127 +489,178 @@ Public Class Form1
     End Sub
 
     Private Sub TextBox_ADSPort_TextChanged(sender As Object, e As EventArgs) Handles TextBox_ADSPort.TextChanged
-        If TextBox_ADSPort.Text <> "" Then
-            Dim value As Integer
-            Try
-                value = Int32.Parse(TextBox_ADSPort.Text)
-            Catch ex As Exception
-                MessageBox.Show("Didn't understand the port you put in, it must be an integer.  Defaulting to 851 for TC3 Runtime 1")
-                TextBox_ADSPort.Text = "851"
-                value = 851
-            End Try
-            If value < 1 Then
-                TextBox_ADSPort.Text = "851"
-            End If
-            My.Settings.sPLC_PORT = TextBox_ADSPort.Text
-            My.Settings.Save()
-        End If
-
-    End Sub
-
-    Private Sub ConnectToPLC()
-
-        ' Disable buttons/input while connected.
-
-        If BgTaskData.ADS_Connection Is Nothing Then
-
-            ' Validate inputs
-            Dim rate As Integer
-            Try
-                rate = Int32.Parse(TextBox_ADSRate.Text)
-            Catch ex As Exception
-                MessageBox.Show("Didn't understand the rate you put in, it must be an integer.  Defaulting to 100ms")
-                TextBox_ADSPort.Text = "100"
-                rate = 100
-            End Try
-
-            Dim port As Integer
-            Try
-                port = Int32.Parse(TextBox_ADSPort.Text)
-            Catch ex As Exception
-                MessageBox.Show("Didn't understand the port you put in, it must be an integer.  Defaulting to 851 for TC3 Runtime 1")
-                TextBox_ADSPort.Text = "851"
-                port = 851
-            End Try
-
-            Dim ADSWatchdog As Integer
-            Try
-                ADSWatchdog = Int32.Parse(TextBox_ADSWatchdog.Text)
-            Catch ex As Exception
-                MessageBox.Show("Didn't understand the ADS Watchdog you put in, it must be an integer.  Defaulting to 200ms")
-                TextBox_ADSWatchdog.Text = "200"
-                ADSWatchdog = 200
-            End Try
-
-            Dim ADSWatchdogDeadDuration As Integer
-            Try
-                ADSWatchdogDeadDuration = Int32.Parse(TextBox_ADSWatchdogDeadDuration.Text)
-            Catch ex As Exception
-                MessageBox.Show("Didn't understand the ADS Watchdog Dead Duration you put in, it must be an integer.  Defaulting to 2000ms")
-                TextBox_ADSWatchdogDeadDuration.Text = "2000"
-                ADSWatchdogDeadDuration = 2000
-            End Try
-
-            BgTaskData = New Form1.TaskData(rate, ADSWatchdog, ADSWatchdogDeadDuration,
-                                  TextBox_ADSNetID.Text, port)
-
-            Try
-                BgTaskData.ADS_Connection = New Ads_Link(BgTaskData.NetID, BgTaskData.Port) ' Connect to local twincat. 
-            Catch Ex As System.Exception
-                Console.WriteLine("StartPoller():" + Ex.Message)
-            End Try
-
-            ' Dwell to let port open
-            Threading.Thread.Sleep(500)
-
-            ' See if we can find the FB on the PLC.
-            Dim testtag As ITcAdsSymbol
-            Try
-                testtag = BgTaskData.ADS_Connection.AdsClient.ReadSymbolInfo(TextBox_TcJoyPath.Text + ".bHeartBeatToggle")
-            Catch ex As Exception
-                Console.WriteLine("Exception looking for fb instance.")
-                testtag = Nothing
-            End Try
-
-            If testtag Is Nothing Then
-                TextBox_TcJoyFunctionBlockStatus.Text = "NOT FOUND! CHECK INSTANCE PATH."
-                TextBox_TcJoyFunctionBlockStatus.ForeColor = Color.Black
-                TextBox_TcJoyFunctionBlockStatus.BackColor = Color.OrangeRed
-                TextBox_TcJoyPath.Focus()
-
-                ' Kill ads object.
-                BgTaskData.ADS_Connection.AdsClient.Dispose()
-                BgTaskData.ADS_Connection = Nothing
-            Else
-                TextBox_TcJoyFunctionBlockStatus.Text = "FOUND IT!"
-                TextBox_TcJoyFunctionBlockStatus.ForeColor = Color.Black
-                TextBox_TcJoyFunctionBlockStatus.BackColor = Color.LawnGreen
-
-                TextBox_TcJoyFunctionBlockStatus.Enabled = False
-                TextBox_ADSPort.Enabled = False
-                TextBox_ADSNetID.Enabled = False
-                TextBox_ADSRate.Enabled = False
-                Button_ADSConnect.Enabled = False
-                Button_ADSDisconnect.Enabled = True
-
-                ' Build IO List
-                AddVariablesToList(BgTaskData)
-
-                ' Start sending data using this timer's tick function.
-                Timer_SendDataToPLC.Interval = CInt(TextBox_ADSRate.Text)
-                Timer_SendDataToPLC.Start()
-
-                Button_ADSDisconnect.Enabled = True
-
-
-            End If
-
-        End If
-
+        My.Settings.sPLC_PORT = TextBox_ADSPort.Text
+        My.Settings.Save()
     End Sub
 
     Private Sub Button_ADSConnect_Click(sender As Object, e As EventArgs) Handles Button_ADSConnect.Click
-        ConnectToPLC()
+        ' Validate inputs
+        Dim NetID As AmsNetId
+        Try
+            NetID = AmsNetId.Parse(TextBox_ADSNetID.Text) ' Attempt to parse input into an AmsAdress
+        Catch ex As Exception
+            MessageBox.Show("The attempt to parse your Net ID into an AmsNetId returned the following Exception: " + ex.Message + vbNewLine + " Defaulting to Net ID: 192.168.1.10.1.1")
+            TextBox_ADSNetID.Text = "192.168.1.10.1.1"
+            NetID = AmsNetId.Parse(TextBox_ADSNetID.Text)
+        End Try
+
+        Dim port As Integer
+        Try
+            port = TextBox_ADSPort.Text
+            If port <= 0 Then
+                TextBox_ADSPort.Text = 801
+                MessageBox.Show("Your Port input is unreasonable. Defaulting to Port 801")
+            End If
+        Catch ex As Exception
+            MessageBox.Show("The attempt to parse your Port into an Integer returned the following Exception: " + ex.Message + vbNewLine + " Defaulting to Port: 801")
+            TextBox_ADSPort.Text = 801
+            port = 801
+        End Try
+
+        Dim rate As Integer
+        Try
+            rate = TextBox_ADSRate.Text
+            If rate <= 0 Then
+                TextBox_ADSRate.Text = 100
+                MessageBox.Show("Your ADS Rate input is unreasonable. Defaulting to 100ms")
+            End If
+        Catch ex As Exception
+            TextBox_ADSRate.Text = 100
+            MessageBox.Show("The attempt to parse your Rate into an Integer returned the following Exception: " + ex.Message + vbNewLine + " Defaulting to 100ms")
+        End Try
+
+        Dim ADSWatchdog As Integer
+        Try
+            If TextBox_ADSWatchdog.Text <= 0 Then
+                TextBox_ADSWatchdog.Text = 300
+                MessageBox.Show("Your Watchdog input is unreasonable. Defaulting to 300ms")
+            End If
+        Catch ex As Exception
+            MessageBox.Show("The attempt to parse your ADS Watchtog time into an Integer returned the following Exception: " + ex.Message + vbNewLine + " Defaulting to 300ms")
+            TextBox_ADSWatchdog.Text = 300
+        End Try
+
+
+        Dim ADSWatchdogDeadDuration As Integer
+        Try
+            ADSWatchdogDeadDuration = TextBox_ADSWatchdogDeadDuration.Text
+            If ADSWatchdogDeadDuration <= 1 Then
+                MessageBox.Show("Your Watchdog Dead Duration input is unreasonable. Defaulting to 2000ms")
+                TextBox_ADSWatchdogDeadDuration.Text = 2000
+            End If
+        Catch ex As Exception
+            MessageBox.Show("The attempt to parse your ADS Watchdog Dead Duration into an Integer returned the following Exception: " + ex.Message + vbNewLine + " Defaulting to 2000ms")
+            TextBox_ADSWatchdogDeadDuration.Text = 2000
+        End Try
+
+        ' Build IO List
+        BgTaskData = New Form1.TaskData(rate, ADSWatchdog, ADSWatchdogDeadDuration, NetID, port)
+
+        BgTaskData.ADS_Connection = New Ads_Link(NetID, port)
+        If BgTaskData.ADS_Connection.AdsClient.IsConnected Then
+            ' Check if target PLC is running
+            Dim targetState As StateInfo
+            targetState = BgTaskData.ADS_Connection.AdsClient.ReadState()
+            If Not targetState.AdsState.ToString = "Run" Then
+                Button_ADSDisconnect_Click(Me, e)
+                TextBox_AdditionalInformation.BackColor = Color.Orange
+                TextBox_AdditionalInformation.Text = String.Format("Target PLC state: {0}", targetState.AdsState.ToString)
+                TextBox_PLCVariables.BackColor = Color.Orange
+                TextBox_PLCVariables.Text = "Please start the PLC program!"
+                MessageBox.Show("Please start the PLC program and try to connect again!")
+                Exit Sub
+            Else
+                ' See if we can find the FB on the PLC.
+                Dim testtag As ITcAdsSymbol
+                testtag = BgTaskData.ADS_Connection.AdsClient.ReadSymbolInfo(TextBox_TcJoyPath.Text + ".tonUpdateRate.ET")
+                If testtag Is Nothing Then
+                    Button_ADSDisconnect_Click(Me, e)
+                    TextBox_AdditionalInformation.Text = "TcJoy instance not found on PLC."
+                    TextBox_AdditionalInformation.BackColor = Color.Orange
+                    TextBox_TcJoyPath.Focus()
+                    MessageBox.Show("TcJoy instance not found on PLC. Make sure you've put in the correct Path to the TcJoy Function Block. Also make sure the Variable sUpdateRateMS exists within the TcJoy Function Block on the PLC.")
+                    Exit Sub
+                Else
+                    'Dim settings As TwinCAT.ISymbolLoaderSettings
+                    'Dim test As ITcAdsSymbolBrowser
+
+                    AddVariablesToList(BgTaskData)
+                    TextBox_ADSNetID.Enabled = False
+                    TextBox_ADSPort.Enabled = False
+                    TextBox_ADSRate.Enabled = False
+                    TextBox_ADSWatchdog.Enabled = False
+                    TextBox_ADSWatchdogDeadDuration.Enabled = False
+                    TextBox_TcJoyPath.Enabled = False
+                    Button_ADSDisconnect.Enabled = True
+                    Button_ADSConnect.Enabled = False
+                    Button_ResetSettings.Enabled = False
+                    TextBox_ADSConnectionStatus.BackColor = Color.LawnGreen
+                    TextBox_ADSConnectionStatus.Text = "Connected."
+                    TextBox_AdditionalInformation.BackColor = Color.LightGray
+                    TextBox_AdditionalInformation.Text = ""
+                    TextBox_PLCVariables.BackColor = Color.LightGray
+                    TextBox_PLCVariables.Text = ""
+
+                    ' Copy ADS Connection Status textbox from 'Connection' Tab to the second ADS Connection Status textbox on the 'Live Status' Tab 
+                    TextBox_ADSConnectionStatus2.BackColor = TextBox_ADSConnectionStatus.BackColor
+                    TextBox_ADSConnectionStatus2.Text = TextBox_ADSConnectionStatus.Text
+
+                    ' Change to Live Status Tab when Connection is established succesfully
+                    TabControl.SelectedTab = TabPage_LiveStatus
+
+                    ' Start sending data using this timer's tick function.
+                    Timer_SendDataToPLC.Interval = CInt(TextBox_ADSRate.Text)
+                    Timer_SendDataToPLC.Start()
+                End If
+            End If
+        End If
+    End Sub
+
+    Public Sub Button_ADSDisconnect_Click(sender As Object, e As EventArgs) Handles Button_ADSDisconnect.Click
+        Timer_SendDataToPLC.Stop()
+
+        ' Kill ads object if it still exists
+        If Not BgTaskData.ADS_Connection Is Nothing Then
+            BgTaskData.ADS_Connection.AdsClient.Dispose()
+            BgTaskData.ADS_Connection = Nothing
+        End If
+
+        TextBox_ADSNetID.Enabled = True
+        TextBox_ADSPort.Enabled = True
+        TextBox_ADSRate.Enabled = True
+        TextBox_ADSWatchdog.Enabled = True
+        TextBox_ADSWatchdogDeadDuration.Enabled = True
+        TextBox_TcJoyPath.Enabled = True
+        Button_ADSConnect.Enabled = True
+        Button_ADSDisconnect.Enabled = False
+        Button_ResetSettings.Enabled = True
+        TextBox_ADSConnectionStatus.Text = "Disconnected."
+        TextBox_ADSConnectionStatus.BackColor = Color.OrangeRed
+        TextBox_AdditionalInformation.Text = "Disconnect Button used."
+        TextBox_AdditionalInformation.BackColor = Color.LightGray
+        TextBox_PLCVariables.Text = ""
+        TextBox_PLCVariables.BackColor = Color.LightGray
+
+        ' Copy ADS Connection Status textbox from 'Connection' Tab to the second ADS Connection Status textbox on the 'Live Status' Tab 
+        TextBox_ADSConnectionStatus2.BackColor = TextBox_ADSConnectionStatus.BackColor
+        TextBox_ADSConnectionStatus2.Text = TextBox_ADSConnectionStatus.Text
+
+        ' Change to Connection Tab when disconnected from PLC        
+        TabControl.SelectedTab = TabPage_Connection
+    End Sub
+
+    Private Sub Button_ResetSettings_Click(sender As Object, e As EventArgs) Handles Button_ResetSettings.Click
+        CheckBox_AutoConnectOnOpen.Checked = False
+        TextBox_ADSNetID.Text = "0.0.0.0.0.0"
+        TextBox_ADSPort.Text = 851
+        TextBox_TcJoyPath.Text = "Global_Variables.TcJoy"
+        TextBox_ADSRate.Text = 100
+        TextBox_ADSWatchdog.Text = 400
+        TextBox_ADSWatchdogDeadDuration.Text = 2000
+        Textbox_TcJoyUpdateRate.Text = 200
+        TextBox_AnalogDeadzone.Text = 8000 ' counts of 32767
+        TextBox_ShoulderDeadzone.Text = 0  ' counts of 255
+        Textbox_TcJoyUpdateRate.Text = 200
     End Sub
 
     Private Sub TextBox_TcJoyPath_TextChanged(sender As Object, e As EventArgs) Handles TextBox_TcJoyPath.TextChanged
@@ -696,90 +669,32 @@ Public Class Form1
     End Sub
 
     Private Sub TextBox_ADSRate_TextChanged(sender As Object, e As EventArgs) Handles TextBox_ADSRate.TextChanged
-        If TextBox_ADSRate.Text <> "" Then
-            Dim value As Integer
-            Try
-                value = Int32.Parse(TextBox_ADSRate.Text)
-            Catch ex As Exception
-                MessageBox.Show("Didn't understand the value you put in, it must be an integer. Setting a default value.")
-                TextBox_ADSRate.Text = "100"
-                value = 100
-            End Try
-            If value < 1 Then
-                TextBox_ADSRate.Text = "1"
-            End If
-            My.Settings.sADSRate = TextBox_ADSRate.Text
-            My.Settings.Save()
-        End If
-
-    End Sub
-
-    Private Sub DisconnectFromPLC()
-        TextBox_TcJoyFunctionBlockStatus.Enabled = False
-        TextBox_ADSPort.Enabled = False
-        TextBox_ADSNetID.Enabled = False
-        TextBox_ADSRate.Enabled = False
-        Button_ADSDisconnect.Enabled = False
-        Button_ADSConnect.Enabled = True
-        Label_JoyActiveFromPLC.BackColor = Color.LightGray
-        Label_JoyActiveFromPLC.Text = "Latency Status"
-        ProgressBar_ADSBad.Value = 0
-        ProgressBar_ADSGood.Value = 0
-
-        Timer_SendDataToPLC.Stop()
-        Threading.Thread.Sleep(100)
-
-        ' Kill ads object.
-        If Not BgTaskData.ADS_Connection Is Nothing Then
-            BgTaskData.ADS_Connection.AdsClient.Dispose()
-            BgTaskData.ADS_Connection = Nothing
-        End If
-    End Sub
-
-    Private Sub Button_ADSDisconnect_Click(sender As Object, e As EventArgs) Handles Button_ADSDisconnect.Click
-        DisconnectFromPLC()
+        My.Settings.sADSRate = TextBox_ADSRate.Text
+        My.Settings.Save()
     End Sub
 
     Private Sub TextBox_ADSWatchdog_TextChanged(sender As Object, e As EventArgs) Handles TextBox_ADSWatchdog.TextChanged
-        If TextBox_ADSWatchdog.Text <> "" Then
-            Dim value As Integer
-            Try
-                value = Int32.Parse(TextBox_ADSWatchdog.Text)
-            Catch ex As Exception
-                MessageBox.Show("Didn't understand the value you put in, it must be an integer. Setting a default value.")
-                TextBox_ADSWatchdog.Text = "200"
-                value = 200
-            End Try
-            If value < 1 Then
-                TextBox_ADSWatchdog.Text = "1"
-            End If
-            ' set in object so plc will get it.
-            If Not BgTaskData Is Nothing Then
-                BgTaskData.ADSWatchdogMs = value
-            End If
-            My.Settings.sADSWatchdog = TextBox_ADSWatchdog.Text
-            My.Settings.Save()
-        End If
+        My.Settings.sADSWatchdog = TextBox_ADSWatchdog.Text
+        My.Settings.Save()
     End Sub
 
     Private Sub TextBox_ADSWatchdogDeadDuration_TextChanged(sender As Object, e As EventArgs) Handles TextBox_ADSWatchdogDeadDuration.TextChanged
-        If TextBox_ADSWatchdogDeadDuration.Text <> "" Then
-            Dim value As Integer
+        My.Settings.sADSWatchdogDeadDuration = TextBox_ADSWatchdogDeadDuration.Text
+        My.Settings.Save()
+    End Sub
+
+    Private Sub Textbox_TcJoyUpdateRate_TextChanged(sender As Object, e As EventArgs) Handles Textbox_TcJoyUpdateRate.TextChanged
+        If Textbox_TcJoyUpdateRate.Text <> "" And Textbox_TcJoyUpdateRate.Text > 0 Then
             Try
-                value = Int32.Parse(TextBox_ADSWatchdogDeadDuration.Text)
+                Timer_TcJoyUpdate.Interval = Textbox_TcJoyUpdateRate.Text
             Catch ex As Exception
-                MessageBox.Show("Didn't understand the value you put in, it must be an integer. Setting a default value.")
-                TextBox_ADSWatchdogDeadDuration.Text = "2000"
-                value = 2000
+                MessageBox.Show("Didn't understand the value you put in, it must be an integer. Setting a default value of 200ms.")
+                Textbox_TcJoyUpdateRate.Text = 200
             End Try
-            If value < 1 Then
-                TextBox_ADSWatchdogDeadDuration.Text = "1"
+            If Textbox_TcJoyUpdateRate.Text <= 0 Then
+                Textbox_TcJoyUpdateRate.Text = 200
             End If
-            ' set in object so plc will get it.
-            If Not BgTaskData Is Nothing Then
-                BgTaskData.ADSWatchdogDeadDurationMS = value
-            End If
-            My.Settings.sADSWatchdogDeadDuration = TextBox_ADSWatchdogDeadDuration.Text
+            My.Settings.sTcJoyUpdateRate = Textbox_TcJoyUpdateRate.Text
             My.Settings.Save()
         End If
     End Sub
@@ -788,19 +703,18 @@ Public Class Form1
         If TextBox_AnalogDeadzone.Text <> "" Then
             Dim value As Integer
             Try
-                value = Int32.Parse(TextBox_AnalogDeadzone.Text)
+                value = TextBox_AnalogDeadzone.Text
             Catch ex As Exception
                 MessageBox.Show("Didn't understand the value you put in, it must be an integer. Setting a default value.")
-                TextBox_AnalogDeadzone.Text = "6000"
+                TextBox_AnalogDeadzone.Text = 6000
                 value = 6000
             End Try
             If value < 0 Then
-                TextBox_AnalogDeadzone.Text = "6000"
+                TextBox_AnalogDeadzone.Text = 6000
             End If
             My.Settings.sAnalogDeadZone = TextBox_AnalogDeadzone.Text
             My.Settings.Save()
         End If
-
     End Sub
 
     Private Sub TextBox_ShoulderDeadzone_TextChanged(sender As Object, e As EventArgs) Handles TextBox_ShoulderDeadzone.TextChanged
@@ -810,16 +724,15 @@ Public Class Form1
                 value = Int32.Parse(TextBox_ShoulderDeadzone.Text)
             Catch ex As Exception
                 MessageBox.Show("Didn't understand the value you put in, it must be an integer. Setting a default value.")
-                TextBox_ShoulderDeadzone.Text = "0"
+                TextBox_ShoulderDeadzone.Text = 0
                 value = 0
             End Try
             If value < 0 Then
-                TextBox_ShoulderDeadzone.Text = "0"
+                TextBox_ShoulderDeadzone.Text = 0
             End If
             My.Settings.sShoulderDeadZone = TextBox_ShoulderDeadzone.Text
             My.Settings.Save()
         End If
-
     End Sub
 
     Private Sub Form1_Closing(sender As Object, e As CancelEventArgs) Handles Me.Closing
@@ -829,7 +742,6 @@ Public Class Form1
         End
     End Sub
 
-
 #End Region
 
     Public Class TaskData
@@ -838,13 +750,13 @@ Public Class Form1
         Private _UpdateRateMS As Integer
         Private _ADSWatchdogMs As Integer
         Private _ADSWatchdogDeadDurationMS As Integer
-        Private _NetID As String
+        Private _NetID As AmsNetId
         Private _Port As Integer
         Private _IsConnected As Boolean
         Private _ADS_Connection As Ads_Link
 
 
-        Public Sub New(UpdateRateMs As Integer, ADSWatchdogMs As Integer, ADSWatchdogDeadDurationMS As Integer, NetID As String, Port As Integer)
+        Public Sub New(UpdateRateMs As Integer, ADSWatchdogMs As Integer, ADSWatchdogDeadDurationMS As Integer, NetID As AmsNetId, Port As AmsPort)
             _TagList = New List(Of DataTag)
             _UpdateRateMS = UpdateRateMs
             _ADSWatchdogMs = ADSWatchdogMs
@@ -889,11 +801,11 @@ Public Class Form1
             End Set
         End Property
 
-        Property NetID As String
+        Property NetID As AmsNetId
             Get
                 Return _NetID
             End Get
-            Set(value As String)
+            Set(value As AmsNetId)
                 _NetID = value
             End Set
         End Property
@@ -933,14 +845,14 @@ Public Class Form1
     Public Class DataTag
 
         Private _TagName As String
-        Private _TagType As Object
+        'Private _TagType As Object
         Private _IsRead As Boolean
         Private _IsWritten As Boolean
         Private _value As Object
 
-        Public Sub New(TagName As String, TagType As Object, IsRead As Boolean, IsWritten As Boolean)
+        Public Sub New(TagName As String, IsRead As Boolean, IsWritten As Boolean)
             _TagName = TagName
-            _TagType = TagType
+            '_TagType = TagType
             _IsRead = IsRead
             _IsWritten = IsWritten
             _value = New Object
@@ -956,14 +868,14 @@ Public Class Form1
             End Set
         End Property
 
-        Property TagType As Object
-            Get
-                Return _TagType
-            End Get
-            Set(value As Object)
-                _TagType = value
-            End Set
-        End Property
+        'Property TagType As Object
+        '    Get
+        '        Return _TagType
+        '    End Get
+        '    Set(value As Object)
+        '        _TagType = value
+        '    End Set
+        'End Property
 
         Property IsRead As Boolean
             Get
@@ -994,5 +906,8 @@ Public Class Form1
 
     End Class
 
+    Private Sub Textbox_TcJoyUpdateRate_Leave(sender As Object, e As EventArgs) Handles Textbox_TcJoyUpdateRate.Leave
+
+    End Sub
 
 End Class
