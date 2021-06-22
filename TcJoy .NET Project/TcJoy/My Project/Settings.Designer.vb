@@ -15,14 +15,14 @@ Option Explicit On
 Namespace My
     
     <Global.System.Runtime.CompilerServices.CompilerGeneratedAttribute(),  _
-     Global.System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "14.0.0.0"),  _
+     Global.System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "11.0.0.0"),  _
      Global.System.ComponentModel.EditorBrowsableAttribute(Global.System.ComponentModel.EditorBrowsableState.Advanced)>  _
     Partial Friend NotInheritable Class MySettings
         Inherits Global.System.Configuration.ApplicationSettingsBase
         
         Private Shared defaultInstance As MySettings = CType(Global.System.Configuration.ApplicationSettingsBase.Synchronized(New MySettings()),MySettings)
         
-#Region "My.Settings Auto-Save Functionality"
+#Region "Funktion zum automatischen Speichern von My.Settings"
 #If _MyType = "WindowsForms" Then
     Private Shared addedHandler As Boolean
 
@@ -114,79 +114,91 @@ Namespace My
             End Set
         End Property
         
-        <Global.System.Configuration.UserScopedSettingAttribute(),  _
-         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
-         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        <Global.System.Configuration.UserScopedSettingAttribute(), _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(), _
+         Global.System.Configuration.DefaultSettingValueAttribute("")> _
         Public Property sADSWatchdog() As String
             Get
-                Return CType(Me("sADSWatchdog"),String)
+                Return CType(Me("sADSWatchdog"), String)
             End Get
-            Set
+            Set(value As String)
                 Me("sADSWatchdog") = value
             End Set
         End Property
-        
-        <Global.System.Configuration.UserScopedSettingAttribute(),  _
-         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
-         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+
+        <Global.System.Configuration.UserScopedSettingAttribute(), _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(), _
+         Global.System.Configuration.DefaultSettingValueAttribute("")> _
         Public Property sADSWatchdogDeadDuration() As String
             Get
-                Return CType(Me("sADSWatchdogDeadDuration"),String)
+                Return CType(Me("sADSWatchdogDeadDuration"), String)
             End Get
-            Set
+            Set(value As String)
                 Me("sADSWatchdogDeadDuration") = value
             End Set
         End Property
-        
-        <Global.System.Configuration.UserScopedSettingAttribute(),  _
-         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
-         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+
+        <Global.System.Configuration.UserScopedSettingAttribute(), _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(), _
+         Global.System.Configuration.DefaultSettingValueAttribute("")> _
         Public Property sAnalogDeadZone() As String
             Get
-                Return CType(Me("sAnalogDeadZone"),String)
+                Return CType(Me("sAnalogDeadZone"), String)
             End Get
-            Set
+            Set(value As String)
                 Me("sAnalogDeadZone") = value
             End Set
         End Property
-        
-        <Global.System.Configuration.UserScopedSettingAttribute(),  _
-         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
-         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+
+        <Global.System.Configuration.UserScopedSettingAttribute(), _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(), _
+         Global.System.Configuration.DefaultSettingValueAttribute("")> _
         Public Property sShoulderDeadZone() As String
             Get
-                Return CType(Me("sShoulderDeadZone"),String)
+                Return CType(Me("sShoulderDeadZone"), String)
             End Get
-            Set
+            Set(value As String)
                 Me("sShoulderDeadZone") = value
             End Set
         End Property
-        
-        <Global.System.Configuration.UserScopedSettingAttribute(),  _
-         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
-         Global.System.Configuration.DefaultSettingValueAttribute("0, 0")>  _
-        Public Property WindowLoc() As Global.system.drawing.point
+
+        <Global.System.Configuration.UserScopedSettingAttribute(), _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(), _
+         Global.System.Configuration.DefaultSettingValueAttribute("0, 0")> _
+        Public Property WindowLoc() As Global.System.Drawing.Point
             Get
-                Return CType(Me("WindowLoc"),Global.system.drawing.point)
+                Return CType(Me("WindowLoc"), Global.system.drawing.point)
             End Get
-            Set
+            Set(value As Global.System.Drawing.Point)
                 Me("WindowLoc") = value
+            End Set
+        End Property
+
+        <Global.System.Configuration.UserScopedSettingAttribute(), _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(), _
+         Global.System.Configuration.DefaultSettingValueAttribute("")> _
+        Public Property sTcJoyUpdateRate() As String
+            Get
+                Return CType(Me("sTcJoyUpdateRate"), String)
+            End Get
+            Set(value As String)
+                Me("sTcJoyUpdateRate") = value
             End Set
         End Property
     End Class
 End Namespace
 
 Namespace My
-    
-    <Global.Microsoft.VisualBasic.HideModuleNameAttribute(),  _
-     Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
-     Global.System.Runtime.CompilerServices.CompilerGeneratedAttribute()>  _
+
+    <Global.Microsoft.VisualBasic.HideModuleNameAttribute(), _
+     Global.System.Diagnostics.DebuggerNonUserCodeAttribute(), _
+     Global.System.Runtime.CompilerServices.CompilerGeneratedAttribute()> _
     Friend Module MySettingsProperty
-        
-        <Global.System.ComponentModel.Design.HelpKeywordAttribute("My.Settings")>  _
-        Friend ReadOnly Property Settings() As Global.TcJoy.My.MySettings
+
+        <Global.System.ComponentModel.Design.HelpKeywordAttribute("My.Settings")> _
+        Friend ReadOnly Property Settings() As Global.TcJoyV2.My.MySettings
             Get
-                Return Global.TcJoy.My.MySettings.Default
+                Return Global.TcJoyV2.My.MySettings.Default
             End Get
         End Property
     End Module
